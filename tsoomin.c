@@ -32,43 +32,17 @@
 #define MOTION_BLUR_SPEED (0.5f) // how fast/slow motion blur "lags behind TRACKING_SPEED"
 #endif
 
-#ifndef KEY_LEFT0
-#define KEY_LEFT0 'a'
-#endif
-
-#ifndef KEY_LEFT1
-#define KEY_LEFT1 XK_Left
-#endif
-
-#ifndef KEY_RIGHT0
-#define KEY_RIGHT0 'd'
-#endif
-
-#ifndef KEY_RIGHT1
-#define KEY_RIGHT1 XK_Right
-#endif
-
-#ifndef KEY_UP0
-#define KEY_UP0 'w'
-#endif
-
-#ifndef KEY_UP1
-#define KEY_UP1 XK_Up
-#endif
-
-#ifndef KEY_DOWN0
-#define KEY_DOWN0 's'
-#endif
-
-#ifndef KEY_DOWN1
-#define KEY_DOWN1 XK_Down
-#endif
-
+#include <X11/keysym.h>
+static const int MOVE_KEYS[][4] = {
+	{'w', XK_Up,          0, -1 },
+	{'a', XK_Left,       -1,  0 },
+	{'s', XK_Down,        0,  1 },
+	{'d', XK_Right,       1,  0 },
+};
 enum present_shader {
 	BLURRY,
 	NOISY,
 } present_shader = NOISY;
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +57,7 @@ enum present_shader {
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include <GL/glx.h>
+
 
 static void chkgl(const char* file, const int line)
 {
@@ -360,6 +335,8 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	float vx = 0.0f;
 	float vy = 0.0f;
 
+	int move_key_state[4] = {0};
+
 	while (exiting <= N_SNAP_BACK_FRAMES) {
 		if (exiting) target_rect = home_rect;
 		int pan_x = 0;
@@ -398,10 +375,25 @@ int tsoom(Window root, XButtonEvent* initial_event)
 				KeySym sym = XLookupKeysym(&xk, 0);
 				const int is_press = (xev.type == KeyPress);
 				if (sym == XK_Escape) exiting++;
-				if (sym == KEY_LEFT0  || sym == KEY_LEFT1)   move_x = is_press ? -1 : 0;
-				if (sym == KEY_RIGHT0 || sym == KEY_RIGHT1)  move_x = is_press ? +1 : 0;
-				if (sym == KEY_UP0    || sym == KEY_UP1)     move_y = is_press ? -1 : 0;
-				if (sym == KEY_DOWN0  || sym == KEY_DOWN1)   move_y = is_press ? +1 : 0;
+				move_x = 0;
+				move_y = 0;
+				for (int i0 = 0; i0 < (sizeof(MOVE_KEYS)/sizeof(MOVE_KEYS[0])); i0++) {
+					for (int i1 = 0; i1 < 2; i1++) {
+						const int set_mask = 1 << i1;
+						if (sym == MOVE_KEYS[i0][i1]) {
+							if (is_press) {
+								move_key_state[i0] |= set_mask;
+							} else {
+								move_key_state[i0] &= ~set_mask;
+							}
+						}
+					}
+					const int st = move_key_state[i0];
+					if (st) {
+						move_x += MOVE_KEYS[i0][2];
+						move_y += MOVE_KEYS[i0][3];
+					}
+				}
 			}
 			}
 		}
