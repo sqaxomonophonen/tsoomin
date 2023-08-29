@@ -322,6 +322,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 
 	XDestroyImage(x_image);
 	XShmDetach(display, &segfo);
+	shmdt(segfo.shmaddr);
 	shmctl(segfo.shmid, IPC_RMID, 0);
 
 	int exiting = 0;
