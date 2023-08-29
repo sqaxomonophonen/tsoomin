@@ -4,6 +4,10 @@
 #define ZOOM_SPEED (0.06) // mouse wheel -> zoom factor multiplier
 #endif
 
+#ifndef KEY_ZOOM_SPEED
+#define KEY_ZOOM_SPEED (0.0015)
+#endif
+
 #ifndef N_SNAP_BACK_FRAMES
 #define N_SNAP_BACK_FRAMES 5 // number of frame spent "returning to normal":
 #endif
@@ -37,18 +41,20 @@
 #endif
 
 #include <X11/keysym.h>
-static const int MOVE_KEYS[][4] = {
-	{'w', XK_Up,          0, -1 },
-	{'a', XK_Left,       -1,  0 },
-	{'s', XK_Down,        0,  1 },
-	{'d', XK_Right,       1,  0 },
+static const int KEYS[][5] = {
+	{'w', XK_Up,          0, -1,  0 },
+	{'a', XK_Left,       -1,  0,  0 },
+	{'s', XK_Down,        0,  1,  0 },
+	{'d', XK_Right,       1,  0,  0 },
+	{'e', XK_Page_Up,     0,  0,  1 },
+	{'q', XK_Page_Down,   0,  0, -1 },
 };
 enum present_shader {
 	BLURRY,
 	NOISY,
 } present_shader = NOISY;
 
-#define N_MOVE_KEYS (sizeof(MOVE_KEYS) / sizeof(MOVE_KEYS[0]))
+#define N_KEYS (sizeof(KEYS) / sizeof(KEYS[0]))
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -336,13 +342,12 @@ static void tsoom(Window root, XButtonEvent* initial_event)
 	if (initial_event->button == 4) dzoom++;
 	if (initial_event->button == 5) dzoom--;
 
-	int move_x = 0;
-	int move_y = 0;
 	int is_panning = 0;
-	float vx = 0.0f;
-	float vy = 0.0f;
 
-	int move_key_state[N_MOVE_KEYS] = {0};
+	int move[3] = {0};
+	float vel[3] = {0};
+
+	int key_state[N_KEYS] = {0};
 
 	while (exiting <= N_SNAP_BACK_FRAMES) {
 		if (exiting) target_rect = home_rect;
@@ -368,13 +373,13 @@ static void tsoom(Window root, XButtonEvent* initial_event)
 				if (b == PAN_MOUSE_BUTTON) is_panning = is_press;
 			} break;
 			case MotionNotify: {
+				XMotionEvent xm = xev.xmotion;
 				if (is_panning) {
-					XMotionEvent xm = xev.xmotion;
 					pan_x += -(xm.x - mx);
 					pan_y += -(xm.y - my);
-					mx = xm.x;
-					my = xm.y;
 				}
+				mx = xm.x;
+				my = xm.y;
 			} break;
 			case KeyPress:
 			case KeyRelease: {
@@ -382,23 +387,22 @@ static void tsoom(Window root, XButtonEvent* initial_event)
 				KeySym sym = XLookupKeysym(&xk, 0);
 				const int is_press = (xev.type == KeyPress);
 				if (sym == XK_Escape) exiting++;
-				move_x = 0;
-				move_y = 0;
-				for (int i0 = 0; i0 < N_MOVE_KEYS; i0++) {
+				for (int i = 0; i < 3; i++) move[i] = 0;
+				for (int i0 = 0; i0 < N_KEYS; i0++) {
 					for (int i1 = 0; i1 < 2; i1++) {
 						const int set_mask = 1 << i1;
-						if (sym == MOVE_KEYS[i0][i1]) {
+						if (sym == KEYS[i0][i1]) {
 							if (is_press) {
-								move_key_state[i0] |= set_mask;
+								key_state[i0] |= set_mask;
 							} else {
-								move_key_state[i0] &= ~set_mask;
+								key_state[i0] &= ~set_mask;
 							}
 						}
 					}
-					const int st = move_key_state[i0];
-					if (st) {
-						move_x += MOVE_KEYS[i0][2];
-						move_y += MOVE_KEYS[i0][3];
+					if (key_state[i0]) {
+						for (int i = 0; i < 3; i++) {
+							move[i] += KEYS[i0][2+i];
+						}
 					}
 				}
 			}
@@ -407,29 +411,26 @@ static void tsoom(Window root, XButtonEvent* initial_event)
 
 		{
 			union rect* r = &target_rect;
-			const float m = (float)dzoom * (float)ZOOM_SPEED;
+			const float m = (float)dzoom * (float)ZOOM_SPEED + (vel[2] * KEY_ZOOM_SPEED);
 			const float nx = (r->x1 - r->x0) / (float)width;
 			const float ny = (r->y1 - r->y0) / (float)height;
 
 			const float cx = r->x0 + (float)mx * nx;
 			const float cy = r->y0 + (float)my * ny;
 
-			if (move_x) {
-				vx += (float)move_x * MOVE_ACCELERATION;
-				vx *= MOVE_FRICTION;
-			} else {
-				vx *= MOVE_BRAKE;
-			}
-			if (move_y) {
-				vy += (float)move_y * MOVE_ACCELERATION;
-				vy *= MOVE_FRICTION;
-			} else {
-				vy *= MOVE_BRAKE;
+			for (int i = 0; i < 3; i++) {
+				int m = move[i];
+				if (m) {
+					vel[i] += (float)m * MOVE_ACCELERATION;
+					vel[i] *= MOVE_FRICTION;
+				} else {
+					vel[i] *= MOVE_BRAKE;
+				}
 			}
 
 			const float d = (float)height * 0.001f;
-			const float dx = nx*(vx*d + (float)pan_x);
-			const float dy = ny*(vy*d + (float)pan_y);
+			const float dx = nx*(vel[0]*d + (float)pan_x);
+			const float dy = ny*(vel[1]*d + (float)pan_y);
 
 			r->x0 += m * (cx - r->x0) + dx;
 			r->y0 += m * (cy - r->y0) + dy;
