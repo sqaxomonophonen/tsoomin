@@ -1,11 +1,35 @@
 // $ cc -Wall -std=c11 $(pkg-config --cflags x11 xext gl) tsoomin.c -o tsoomin $(pkg-config --libs x11 xext gl)
 
+#ifndef ZOOM_SPEED
+#define ZOOM_SPEED (0.06) // mouse wheel -> zoom factor multiplier
+#endif
+
+#ifndef N_SNAP_BACK_FRAMES
+#define N_SNAP_BACK_FRAMES 5 // number of frame spent "returning to normal:
+#endif
+
 #ifndef MODIFIER
 #define MODIFIER     Mod4Mask // OS-key; you can change it with -D options or whatever
 #endif
 
-#ifndef ZOOM_SPEED
-#define ZOOM_SPEED (0.03)
+#ifndef MOVE_FRICTION
+#define MOVE_FRICTION (0.85f) // cursor movement: friction
+#endif
+
+#ifndef MOVE_ACCELERATION
+#define MOVE_ACCELERATION (2.5f) // cursor movement: acceleration
+#endif
+
+#ifndef MOVE_BRAKE
+#define MOVE_BRAKE (0.7f) // cursor movement: brake (when releaseing keys)
+#endif
+
+#ifndef TRACKING_SPEED
+#define TRACKING_SPEED (0.6f) // how fast it moves to the target rectangle (which is "discrete" due to mouse wheel events)
+#endif
+
+#ifndef MOTION_BLUR_SPEED
+#define MOTION_BLUR_SPEED (0.5f) // how fast/slow motion blur "lags behind TRACKING_SPEED"
 #endif
 
 #ifndef KEY_LEFT0
@@ -39,6 +63,12 @@
 #ifndef KEY_DOWN1
 #define KEY_DOWN1 XK_Down
 #endif
+
+enum present_shader {
+	BLURRY,
+	NOISY,
+} present_shader = NOISY;
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,11 +125,6 @@ union rect {
 		float x0, y0, x1, y1;
 	};
 	float s[4];
-};
-
-enum present {
-	BLURRY,
-	NOISY,
 };
 
 Display* display;
@@ -188,8 +213,6 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	GLXContext glctx = glXCreateContext(display, vis, NULL, GL_TRUE);
 	assert(glXMakeCurrent(display, window, glctx));
 
-	enum present present = NOISY;
-
 	GLuint program = glCreateProgram(); CHKGL;
 	GLint u_rect0, u_rect1, u_texture;
 	{
@@ -228,7 +251,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 
 		char* frag_src =
 
-		(present == BLURRY)
+		(present_shader == BLURRY)
 		?
 		"#version 130\n"
 		"\n"
@@ -252,7 +275,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 		"}\n"
 
 		:
-		(present == NOISY)
+		(present_shader == NOISY)
 		?
 
 		"#version 130\n"
@@ -321,9 +344,10 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	shmctl(segfo.shmid, IPC_RMID, 0);
 
 	int exiting = 0;
-	union rect rect0 = {{0,0,1,1}};
-	union rect rect1 = rect0;
-	union rect target_rect = rect0;
+	const union rect home_rect = {{0,0,1,1}};
+	union rect rect0 = home_rect;
+	union rect rect1 =  home_rect;
+	union rect target_rect =  home_rect;
 	int dzoom = 0;
 	int mx = initial_event->x_root;
 	int my = initial_event->y_root;
@@ -336,7 +360,8 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	float vx = 0.0f;
 	float vy = 0.0f;
 
-	while (!exiting) {
+	while (exiting <= N_SNAP_BACK_FRAMES) {
+		if (exiting) target_rect = home_rect;
 		int pan_x = 0;
 		int pan_y = 0;
 		while (XPending(display)) {
@@ -352,7 +377,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 				my = xb.y;
 				const int b = xb.button;
 				if (is_press) {
-					if (1 <= b && b <= 2) exiting = 1;
+					if (1 <= b && b <= 2) exiting++;
 					if (b == 4) dzoom++;
 					if (b == 5) dzoom--;
 				}
@@ -372,7 +397,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 				XKeyEvent xk = xev.xkey;
 				KeySym sym = XLookupKeysym(&xk, 0);
 				const int is_press = (xev.type == KeyPress);
-				if (sym == XK_Escape) exiting = 1;
+				if (sym == XK_Escape) exiting++;
 				if (sym == KEY_LEFT0  || sym == KEY_LEFT1)   move_x = is_press ? -1 : 0;
 				if (sym == KEY_RIGHT0 || sym == KEY_RIGHT1)  move_x = is_press ? +1 : 0;
 				if (sym == KEY_UP0    || sym == KEY_UP1)     move_y = is_press ? -1 : 0;
@@ -390,20 +415,17 @@ int tsoom(Window root, XButtonEvent* initial_event)
 			const float cx = r->x0 + (float)mx * nx;
 			const float cy = r->y0 + (float)my * ny;
 
-			const float friction = 0.85f;
-			const float brake = 0.7f;
-			const float acceleration = 2.5f;
 			if (move_x) {
-				vx += (float)move_x * acceleration;
-				vx *= friction;
+				vx += (float)move_x * MOVE_ACCELERATION;
+				vx *= MOVE_FRICTION;
 			} else {
-				vx *= brake;
+				vx *= MOVE_BRAKE;
 			}
 			if (move_y) {
-				vy += (float)move_y * acceleration;
-				vy *= friction;
+				vy += (float)move_y * MOVE_ACCELERATION;
+				vy *= MOVE_FRICTION;
 			} else {
-				vy *= brake;
+				vy *= MOVE_BRAKE;
 			}
 
 			const float d = (float)height * 0.001f;
@@ -432,9 +454,10 @@ int tsoom(Window root, XButtonEvent* initial_event)
 		glXSwapBuffers(display, window);
 
 		for (int i = 0; i < 4; i++) {
-			rect0.s[i] += (target_rect.s[i] - rect0.s[i]) * 0.7f;
-			rect1.s[i] += (target_rect.s[i] - rect1.s[i]) * 0.35f;
+			rect0.s[i] += (target_rect.s[i] - rect0.s[i]) * TRACKING_SPEED;
+			rect1.s[i] += (target_rect.s[i] - rect1.s[i]) * TRACKING_SPEED * MOTION_BLUR_SPEED;
 		}
+		if (exiting) exiting++;
 	}
 
 	glDeleteTextures(1, &texture);
