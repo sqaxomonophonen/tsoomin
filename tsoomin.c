@@ -5,7 +5,7 @@
 #endif
 
 #ifndef N_SNAP_BACK_FRAMES
-#define N_SNAP_BACK_FRAMES 5 // number of frame spent "returning to normal:
+#define N_SNAP_BACK_FRAMES 5 // number of frame spent "returning to normal":
 #endif
 
 #ifndef PAN_MOUSE_BUTTON
