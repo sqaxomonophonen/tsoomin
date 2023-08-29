@@ -8,6 +8,10 @@
 #define N_SNAP_BACK_FRAMES 5 // number of frame spent "returning to normal:
 #endif
 
+#ifndef PAN_MOUSE_BUTTON
+#define PAN_MOUSE_BUTTON 1 // LMB=1, MMB=2, RMB=3
+#endif
+
 #ifndef MODIFIER
 #define MODIFIER     Mod4Mask // OS-key; you can change it with -D options or whatever
 #endif
@@ -356,11 +360,11 @@ int tsoom(Window root, XButtonEvent* initial_event)
 				my = xb.y;
 				const int b = xb.button;
 				if (is_press) {
-					if (1 <= b && b <= 2) exiting++;
+					if (1 <= b && b <= 3 && b != PAN_MOUSE_BUTTON) exiting++;
 					if (b == 4) dzoom++;
 					if (b == 5) dzoom--;
 				}
-				if (b == 3) is_panning = is_press;
+				if (b == PAN_MOUSE_BUTTON) is_panning = is_press;
 			} break;
 			case MotionNotify: {
 				if (is_panning) {
