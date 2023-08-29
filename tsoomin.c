@@ -68,7 +68,7 @@ enum present {
 
 Display* display;
 
-int tsoom(Window root)
+int tsoom(Window root, XButtonEvent* initial_event)
 {
 	int screen = -1;
 	const int n_screens = ScreenCount(display);
@@ -285,10 +285,12 @@ int tsoom(Window root)
 	union rect rect0 = {{0,0,1,1}};
 	union rect rect1 = rect0;
 	union rect target_rect = rect0;
+	int dzoom = 0;
+	int mx = initial_event->x_root;
+	int my = initial_event->y_root;
+	if (initial_event->button == 4) dzoom++;
+	if (initial_event->button == 5) dzoom--;
 	while (!exiting) {
-		int dzoom = 0;
-		int mx = 0;
-		int my = 0;
 		while (XPending(display)) {
 			XEvent xev;
 			XNextEvent(display, &xev);
@@ -314,6 +316,7 @@ int tsoom(Window root)
 			r->y0 += m * (cy - r->y0);
 			r->x1 += m * (cx - r->x1);
 			r->y1 += m * (cy - r->y1);
+			dzoom = 0;
 		}
 
 		glViewport(0, 0, width, height);
@@ -405,7 +408,7 @@ int main(int argc, char** argv)
 				const int b = xev.xbutton.button;
 				if (b == 4 || b == 5) {
 					ungrab();
-					tsoom(xev.xbutton.root);
+					tsoom(xev.xbutton.root, &xev.xbutton);
 					grab();
 				}
 			}
