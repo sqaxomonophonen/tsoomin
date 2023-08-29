@@ -110,7 +110,7 @@ union rect {
 
 Display* display;
 
-int tsoom(Window root, XButtonEvent* initial_event)
+static void tsoom(Window root, XButtonEvent* initial_event)
 {
 	int screen = -1;
 	const int n_screens = ScreenCount(display);
@@ -464,8 +464,6 @@ int tsoom(Window root, XButtonEvent* initial_event)
 
 	glXDestroyContext(display, glctx);
 	XDestroyWindow(display, window);
-
-	return EXIT_SUCCESS;
 }
 
 static void grab(int is_grab, int stage)
