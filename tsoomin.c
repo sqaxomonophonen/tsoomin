@@ -44,6 +44,8 @@ enum present_shader {
 	NOISY,
 } present_shader = NOISY;
 
+#define N_MOVE_KEYS (sizeof(MOVE_KEYS) / sizeof(MOVE_KEYS[0]))
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <locale.h>
@@ -335,7 +337,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	float vx = 0.0f;
 	float vy = 0.0f;
 
-	int move_key_state[4] = {0};
+	int move_key_state[N_MOVE_KEYS] = {0};
 
 	while (exiting <= N_SNAP_BACK_FRAMES) {
 		if (exiting) target_rect = home_rect;
@@ -377,7 +379,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 				if (sym == XK_Escape) exiting++;
 				move_x = 0;
 				move_y = 0;
-				for (int i0 = 0; i0 < (sizeof(MOVE_KEYS)/sizeof(MOVE_KEYS[0])); i0++) {
+				for (int i0 = 0; i0 < N_MOVE_KEYS; i0++) {
 					for (int i1 = 0; i1 < 2; i1++) {
 						const int set_mask = 1 << i1;
 						if (sym == MOVE_KEYS[i0][i1]) {
