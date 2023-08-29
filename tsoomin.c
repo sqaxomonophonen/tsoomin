@@ -4,6 +4,42 @@
 #define MODIFIER     Mod4Mask // OS-key; you can change it with -D options or whatever
 #endif
 
+#ifndef ZOOM_SPEED
+#define ZOOM_SPEED (0.03)
+#endif
+
+#ifndef KEY_LEFT0
+#define KEY_LEFT0 'a'
+#endif
+
+#ifndef KEY_LEFT1
+#define KEY_LEFT1 XK_Left
+#endif
+
+#ifndef KEY_RIGHT0
+#define KEY_RIGHT0 'd'
+#endif
+
+#ifndef KEY_RIGHT1
+#define KEY_RIGHT1 XK_Right
+#endif
+
+#ifndef KEY_UP0
+#define KEY_UP0 'w'
+#endif
+
+#ifndef KEY_UP1
+#define KEY_UP1 XK_Up
+#endif
+
+#ifndef KEY_DOWN0
+#define KEY_DOWN0 's'
+#endif
+
+#ifndef KEY_DOWN1
+#define KEY_DOWN1 XK_Down
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <locale.h>
@@ -152,7 +188,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	GLXContext glctx = glXCreateContext(display, vis, NULL, GL_TRUE);
 	assert(glXMakeCurrent(display, window, glctx));
 
-	enum present present = BLURRY;
+	enum present present = NOISY;
 
 	GLuint program = glCreateProgram(); CHKGL;
 	GLint u_rect0, u_rect1, u_texture;
@@ -232,12 +268,16 @@ int tsoom(Window root, XButtonEvent* initial_event)
 		"}\n"
 		"void main(void)\n"
 		"{\n"
-		"	vec2 uv = mix(v_uv0, v_uv1, rand(v_uv0+v_uv1));\n"
-		"	if (0.0 <= uv.x && uv.x <= 1.0 && 0.0 <= uv.y && uv.y <= 1.0) {\n"
-		"		gl_FragColor = vec4(texture2D(u_texture, uv).xyz, 1.0);\n"
-		"	} else {\n"
-		"		gl_FragColor = vec4(0,0,0,1);\n"
+		"	const int N = 4;\n"
+		"	vec3 acc = vec3(0,0,0);\n"
+		"	for (int i = 0; i < N; i++) {\n"
+		"		vec2 uv = mix(v_uv0, v_uv1, rand(v_uv0+v_uv1));\n"
+		"		if (0.0 <= uv.x && uv.x <= 1.0 && 0.0 <= uv.y && uv.y <= 1.0) {\n"
+		"			acc += texture2D(u_texture, uv).xyz;\n"
+		"		}\n"
 		"	}\n"
+		"	acc *= 1.0 / float(N);\n"
+		"	gl_FragColor = vec4(acc, 1.0);\n"
 		"}\n"
 
 		:
@@ -289,32 +329,92 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	int my = initial_event->y_root;
 	if (initial_event->button == 4) dzoom++;
 	if (initial_event->button == 5) dzoom--;
+
+	int move_x = 0;
+	int move_y = 0;
+	int is_panning = 0;
+	float vx = 0.0f;
+	float vy = 0.0f;
+
 	while (!exiting) {
+		int pan_x = 0;
+		int pan_y = 0;
 		while (XPending(display)) {
 			XEvent xev;
 			XNextEvent(display, &xev);
 			if (XFilterEvent(&xev, None)) continue;
 			switch (xev.type) {
-			case ButtonPress: {
-				mx = xev.xbutton.x;
-				my = xev.xbutton.y;
-				const int b = xev.xbutton.button;
-				if (1 <= b && b <= 3) exiting = 1;
-				if (b == 4) dzoom++;
-				if (b == 5) dzoom--;
+			case ButtonPress:
+			case ButtonRelease: {
+				const int is_press = (xev.type == ButtonPress);
+				XButtonEvent xb = xev.xbutton;
+				mx = xb.x;
+				my = xb.y;
+				const int b = xb.button;
+				if (is_press) {
+					if (1 <= b && b <= 2) exiting = 1;
+					if (b == 4) dzoom++;
+					if (b == 5) dzoom--;
+				}
+				if (b == 3) is_panning = is_press;
 			} break;
+			case MotionNotify: {
+				if (is_panning) {
+					XMotionEvent xm = xev.xmotion;
+					pan_x += -(xm.x - mx);
+					pan_y += -(xm.y - my);
+					mx = xm.x;
+					my = xm.y;
+				}
+			} break;
+			case KeyPress:
+			case KeyRelease: {
+				XKeyEvent xk = xev.xkey;
+				KeySym sym = XLookupKeysym(&xk, 0);
+				const int is_press = (xev.type == KeyPress);
+				if (sym == XK_Escape) exiting = 1;
+				if (sym == KEY_LEFT0  || sym == KEY_LEFT1)   move_x = is_press ? -1 : 0;
+				if (sym == KEY_RIGHT0 || sym == KEY_RIGHT1)  move_x = is_press ? +1 : 0;
+				if (sym == KEY_UP0    || sym == KEY_UP1)     move_y = is_press ? -1 : 0;
+				if (sym == KEY_DOWN0  || sym == KEY_DOWN1)   move_y = is_press ? +1 : 0;
+			}
 			}
 		}
 
-		if (dzoom) {
+		{
 			union rect* r = &target_rect;
-			const float m = (float)dzoom * 0.03f;
-			const float cx = r->x0 + (r->x1-r->x0) * ((float)mx / (float)width);
-			const float cy = r->y0 + (r->y1-r->y0) * ((float)my / (float)height);
-			r->x0 += m * (cx - r->x0);
-			r->y0 += m * (cy - r->y0);
-			r->x1 += m * (cx - r->x1);
-			r->y1 += m * (cy - r->y1);
+			const float m = (float)dzoom * (float)ZOOM_SPEED;
+			const float nx = (r->x1 - r->x0) / (float)width;
+			const float ny = (r->y1 - r->y0) / (float)height;
+
+			const float cx = r->x0 + (float)mx * nx;
+			const float cy = r->y0 + (float)my * ny;
+
+			const float friction = 0.85f;
+			const float brake = 0.7f;
+			const float acceleration = 2.5f;
+			if (move_x) {
+				vx += (float)move_x * acceleration;
+				vx *= friction;
+			} else {
+				vx *= brake;
+			}
+			if (move_y) {
+				vy += (float)move_y * acceleration;
+				vy *= friction;
+			} else {
+				vy *= brake;
+			}
+
+			const float d = (float)height * 0.001f;
+			const float dx = nx*(vx*d + (float)pan_x);
+			const float dy = ny*(vy*d + (float)pan_y);
+
+			r->x0 += m * (cx - r->x0) + dx;
+			r->y0 += m * (cy - r->y0) + dy;
+			r->x1 += m * (cx - r->x1) + dx;
+			r->y1 += m * (cy - r->y1) + dy;
+
 			dzoom = 0;
 		}
 
@@ -333,7 +433,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 
 		for (int i = 0; i < 4; i++) {
 			rect0.s[i] += (target_rect.s[i] - rect0.s[i]) * 0.7f;
-			rect1.s[i] += (target_rect.s[i] - rect1.s[i]) * 0.3f;
+			rect1.s[i] += (target_rect.s[i] - rect1.s[i]) * 0.35f;
 		}
 	}
 
@@ -350,29 +450,58 @@ static void grab(int is_grab, int stage)
 {
 	unsigned int modifiers;
 	int button0, button1;
+	int full;
 	switch (stage) {
 	case 0:
 		// when invisible grab ONLY modifier key + mouse wheel
 		modifiers = MODIFIER;
 		button0 = 4;
 		button1 = 5;
+		full = 0;
 		break;
 	case 1:
 		// when zooming grab all buttons
 		modifiers = AnyModifier;
 		button0 = 1;
 		button1 = 5;
+		full = 1;
 		break;
 	default: assert(!"unhandled stage");
 	}
 	for (int screen = 0; screen < ScreenCount(display); screen++) {
+		Window root = RootWindow(display, screen);
+		if (full) {
+			if (is_grab) {
+				XGrabKeyboard(
+					display,
+					root,
+					False,
+					GrabModeAsync,
+					GrabModeAsync,
+					CurrentTime);
+				XGrabPointer(
+					display,
+					root,
+					False,
+					PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
+					GrabModeAsync,
+					GrabModeAsync,
+					None,
+					None,
+					CurrentTime);
+			} else {
+				XUngrabPointer(display, CurrentTime);
+				XUngrabKeyboard(display, CurrentTime);
+			}
+		}
+
 		for (int button = button0; button <= button1; button++) {
 			if (is_grab) {
 				XGrabButton(
 					display,
 					button,
 					modifiers,
-					RootWindow(display, screen),
+					root,
 					False,
 					ButtonPressMask,
 					GrabModeAsync,
@@ -384,7 +513,7 @@ static void grab(int is_grab, int stage)
 					display,
 					button,
 					modifiers,
-					RootWindow(display, screen));
+					root);
 			}
 		}
 	}
