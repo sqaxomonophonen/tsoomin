@@ -126,7 +126,6 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	XSetWindowAttributes window_attrs = {0};
 
 	window_attrs.colormap = XCreateColormap(display, root, vis->visual, AllocNone);
-	window_attrs.event_mask = ButtonPressMask;
 	window_attrs.override_redirect = 1;
 	window_attrs.save_under = 1;
 
@@ -141,7 +140,7 @@ int tsoom(Window root, XButtonEvent* initial_event)
 		vis->depth,
 		InputOutput,
 		vis->visual,
-		CWColormap | CWEventMask | CWOverrideRedirect | CWSaveUnder,
+		CWColormap | CWOverrideRedirect | CWSaveUnder,
 		&window_attrs);
 
 	char title[1<<10];
@@ -347,37 +346,48 @@ int tsoom(Window root, XButtonEvent* initial_event)
 	return EXIT_SUCCESS;
 }
 
-static void grab(void)
+static void grab(int is_grab, int stage)
 {
+	unsigned int modifiers;
+	int button0, button1;
+	switch (stage) {
+	case 0:
+		// when invisible grab ONLY modifier key + mouse wheel
+		modifiers = MODIFIER;
+		button0 = 4;
+		button1 = 5;
+		break;
+	case 1:
+		// when zooming grab all buttons
+		modifiers = AnyModifier;
+		button0 = 1;
+		button1 = 5;
+		break;
+	default: assert(!"unhandled stage");
+	}
 	for (int screen = 0; screen < ScreenCount(display); screen++) {
-		for (int button = 4; button <= 5; button++) {
-			XGrabButton(
-				display,
-				button,
-				MODIFIER,
-				RootWindow(display, screen),
-				False,
-				ButtonPressMask | ButtonReleaseMask,
-				GrabModeAsync,
-				GrabModeAsync,
-				None,
-				None);
+		for (int button = button0; button <= button1; button++) {
+			if (is_grab) {
+				XGrabButton(
+					display,
+					button,
+					modifiers,
+					RootWindow(display, screen),
+					False,
+					ButtonPressMask,
+					GrabModeAsync,
+					GrabModeAsync,
+					None,
+					None);
+			} else {
+				XUngrabButton(
+					display,
+					button,
+					modifiers,
+					RootWindow(display, screen));
+			}
 		}
 	}
-}
-
-static void ungrab(void)
-{
-	for (int screen = 0; screen < ScreenCount(display); screen++) {
-		for (int button = 4; button <= 5; button++) {
-			XUngrabButton(
-				display,
-				button,
-				MODIFIER,
-				RootWindow(display, screen));
-		}
-	}
-
 }
 
 int main(int argc, char** argv)
@@ -394,7 +404,7 @@ int main(int argc, char** argv)
 
 	XAllowEvents(display, AsyncBoth, CurrentTime);
 
-	grab();
+	grab(1, 0);
 
 	for (;;) {
 		XEvent xev;
@@ -407,9 +417,11 @@ int main(int argc, char** argv)
 			if (xev.xbutton.state == MODIFIER) {
 				const int b = xev.xbutton.button;
 				if (b == 4 || b == 5) {
-					ungrab();
+					grab(0, 0);
+					grab(1, 1);
 					tsoom(xev.xbutton.root, &xev.xbutton);
-					grab();
+					grab(0, 1);
+					grab(1, 0);
 				}
 			}
 			break;
