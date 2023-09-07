@@ -6,3 +6,5 @@ A tiny x11 mouse wheel zoomer inspired by Boomer (https://github.com/tsoding/boo
 Run `make` (depends on `cc`, `libx11`, `libXext`, `libGL`).
 See top of [tsoomin.c](./tsoomin.c) for configuration options. You can override them like this:
 `CFLAGS="-DZOOM_SPEED=0.1 -DMOTION_BLUR_SPEED=0.1" make clean all`
+
+It works on my dwm setup, but I've seen it fail on awesomewm (it runs, but doesn't trigger on Mod4+wheel)
